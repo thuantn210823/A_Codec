@@ -10,6 +10,8 @@ PyTorch Lightning.
 | --- | --- |
 | `soundstream_train.py` | SoundStream encoder / RVQ / decoder plus waveform and STFT discriminators, trained with a GAN objective (manual optimization, 24 kHz). |
 | `encodec_train.py` | EnCodec model and multi-scale STFT discriminator with a balancer, trained with the EnCodec loss (24 kHz, 1 s segments). |
+| `encodec_train_noadv.py` | Same EnCodec model trained without adversarial losses (time L1 + multi-scale mel + commitment only). |
+| `soundstream_train_encodecloss.py` | SoundStream model trained with the EnCodec objective (time L1 + mel, MS-STFT hinge, feature matching, balancer). |
 | `docs/SoundStream-main/` | Reference SoundStream implementation (architecture and original training loop). |
 | `docs/encodec-main/` | Reference EnCodec implementation from Meta. |
 | `docs/snac-main/` | Reference SNAC implementation. |
@@ -26,7 +28,7 @@ tqdm
 
 ## Data
 
-Both training scripts expect LibriTTS (`train-clean-100` for training,
+All training scripts expect LibriTTS (`train-clean-100` for training,
 `dev-clean` for validation) and read audio with `torchaudio`. The dataset
 paths are hard-coded for the Kaggle environment and should be adjusted for
 local runs. Data and checkpoints are not included in this repository.
@@ -36,6 +38,8 @@ local runs. Data and checkpoints are not included in this repository.
 ```bash
 python soundstream_train.py
 python encodec_train.py
+python encodec_train_noadv.py
+python soundstream_train_encodecloss.py
 ```
 
 ## Third-party code
