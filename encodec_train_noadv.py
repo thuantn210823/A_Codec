@@ -49,7 +49,12 @@ warnings.filterwarnings("ignore", message=".*empty filterbank.*")
 # Original: residual = residual - quantized, where `quantized` carries the
 # straight-through estimator -> the residual fed to codebook k>1 has zero
 # gradient w.r.t. the encoder output, so later commitment losses never reach
-# the encoder. Detaching (as in audiocraft) fixes it.
+# the encoder.
+# Fix (same as audiocraft): detach every layer's output so each residual is
+# x - sum(detached q_j) (commitment losses of all layers reach the encoder),
+# then apply ONE straight-through estimator on the sum. Detaching only the
+# residual (but summing the per-layer STE outputs) would multiply the decoder
+# gradient into the encoder by n_q (up to 32x) -> exploding commitment loss.
 # ============================================================
 FIX_RVQ_ISSUE_25 = True
 
@@ -61,10 +66,13 @@ def _rvq_forward_fixed(self, x, n_q=None):
     n_q = n_q or len(self.layers)
     for layer in self.layers[:n_q]:
         quantized, indices, loss = layer(residual)
-        residual = residual - quantized.detach()
+        quantized = quantized.detach()
+        residual = residual - quantized
         quantized_out = quantized_out + quantized
         all_indices.append(indices)
         all_losses.append(loss)
+    if self.training:
+        quantized_out = x + (quantized_out - x).detach()      # single STE: d out / d x = I
     out_losses, out_indices = map(torch.stack, (all_losses, all_indices))
     return quantized_out, out_indices, out_losses
 
@@ -226,6 +234,7 @@ class EncodecTask(L.LightningModule):
         # Training-mode forward: encoder -> RVQ (straight-through + commitment) -> decoder.
         # (EncodecModel.forward uses quantizer.encode/decode, which is not trainable.)
         emb = self.encodec.encoder(x)
+        self._emb_rms = emb.detach().pow(2).mean().sqrt()     # latent-scale diagnostic
         q_res = self.encodec.quantizer(emb, self.encodec.frame_rate, bandwidth)
         G_x = self.encodec.decoder(q_res.quantized)
         T = x.shape[-1]
@@ -276,6 +285,7 @@ class EncodecTask(L.LightningModule):
         self.log_dict({"tt": losses["t"], "tf": losses["f"], "tc": commit_loss},
                       prog_bar=True, on_step=True, on_epoch=True, sync_dist=True)
         self.log("bw", float(bandwidth), on_step=True, on_epoch=False)
+        self.log("emb_rms", self._emb_rms, on_step=True, on_epoch=False)
         return loss
 
     # ---------------- val / test ----------------
